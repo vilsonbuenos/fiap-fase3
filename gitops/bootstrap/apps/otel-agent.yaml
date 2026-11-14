@@ -1,0 +1,40 @@
+# OTel Collector agent (DaemonSet): coleta os logs de todos os containers.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-agent
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      targetRevision: 0.178.3
+      helm:
+        releaseName: otel-agent
+        valueFiles:
+          - $values/gitops/observability/values/otel-agent.yaml
+    - repoURL: https://github.com/vilsonbuenos/fiap-fase3.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # A root-app cria todas as Applications quase ao mesmo tempo; se um CRD de
+    # outra Application (ex.: ServiceMonitor do kube-prometheus-stack) ainda não
+    # existir, o sync falha e é refeito com backoff em vez de ficar parado.
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

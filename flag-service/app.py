@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from functools import wraps
 import logging
+from telemetry import setup_telemetry, instrument_app
 
 # Configura o logging
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +17,11 @@ log = logging.getLogger(__name__)
 # Carrega .env para desenvolvimento local
 load_dotenv() 
 
+# OpenTelemetry antes do pool: o driver psycopg2 precisa estar instrumentado
+setup_telemetry()
+
 app = Flask(__name__)
+instrument_app(app)
 
 # --- Configuração ---
 DATABASE_URL = os.getenv("DATABASE_URL")

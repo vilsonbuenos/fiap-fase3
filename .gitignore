@@ -1,0 +1,13 @@
+# State do Terraform é remoto (S3). Nenhum state local vai para o Git.
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Segredos locais
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/

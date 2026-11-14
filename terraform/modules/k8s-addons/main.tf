@@ -19,6 +19,18 @@ resource "helm_release" "secrets_store_csi_driver" {
     name  = "enableSecretRotation"
     value = "true"
   }
+
+  # Exigido pelo provider AWS (v2+) quando o driver é instalado separado do
+  # chart do provider: sem isso o mount falha ao autenticar via IRSA.
+  set {
+    name  = "tokenRequests[0].audience"
+    value = "sts.amazonaws.com"
+  }
+
+  set {
+    name  = "tokenRequests[1].audience"
+    value = "pods.eks.amazonaws.com"
+  }
 }
 
 data "http" "aws_provider_installer" {
@@ -97,7 +109,7 @@ resource "helm_release" "keda" {
   namespace  = kubernetes_namespace.keda.metadata[0].name
 
   set {
-    name  = "serviceAccount.name"
+    name  = "serviceAccount.operator.name"
     value = "keda-operator"
   }
 

@@ -34,6 +34,11 @@ variable "node_desired_size" {
   type = number
 }
 
+variable "admin_principal_arns" {
+  type    = list(string)
+  default = []
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

@@ -12,5 +12,8 @@ output "attachments_done" {
     aws_iam_role_policy_attachment.analytics_service.id,
     aws_iam_role_policy_attachment.keda.id,
     aws_iam_role_policy_attachment.alb_controller.id,
+    aws_iam_role_policy_attachment.ebs_csi_driver.id,
+    aws_iam_role_policy_attachment.otel_gateway.id,
+    aws_iam_role_policy_attachment.grafana.id,
   ]
 }

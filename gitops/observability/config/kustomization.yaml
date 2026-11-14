@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - namespace.yaml
+  - secretproviderclass-datadog.yaml
+  - secretproviderclass-grafana.yaml
+# O sidecar do Grafana carrega qualquer ConfigMap com grafana_dashboard=1
+configMapGenerator:
+  - name: dashboard-togglemaster-overview
+    files:
+      - dashboards/togglemaster-overview.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: ToggleMaster

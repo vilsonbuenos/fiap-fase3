@@ -32,8 +32,9 @@ terraform {
     }
   }
 
+  # O bucket é informado no init (nome de bucket é global e muda por conta):
+  #   terraform init -backend-config="bucket=<SEU_BUCKET_DE_STATE>"
   backend "s3" {
-    bucket       = "s3-tc3-backend-iac"
     key          = "toggle-master/terraform.tfstate"
     region       = "us-east-2"
     use_lockfile = true

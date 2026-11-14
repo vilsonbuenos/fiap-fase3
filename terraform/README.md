@@ -1,98 +1,82 @@
-# Como rodar este Terraform localmente
+# Como rodar este Terraform
+
+Passo a passo completo numa conta AWS nova (inclui pré-requisitos, bucket de
+state, ArgoCD e observabilidade): [docs/fase4/01-setup-aws-do-zero.md](../docs/fase4/01-setup-aws-do-zero.md).
 
 ## 1. Pré-requisitos
 
 - Terraform >= 1.10
 - AWS CLI v2
-- Acesso à conta AWS (account id atual é detectado automaticamente via `data.aws_caller_identity`)
+- Acesso à conta AWS (o account id é detectado via `data.aws_caller_identity`)
 
-## 2. Configurar credenciais AWS via chave de acesso
+## 2. Credenciais AWS
 
-Evite login via SSO/`aws login`: o token expira em ~15min, tempo insuficiente para o `apply`
-completo (EKS + RDS + ElastiCache podem levar mais de 15min). Use uma chave de acesso
-estática (Access Key/Secret Key de um usuário IAM):
+Use uma chave de acesso de um usuário IAM (o apply completo leva ~25 min):
 
-```powershell
-aws configure --profile <nome-do-profile>
+```bash
+aws configure --profile fiap-fase4      # Access Key, Secret, região us-east-2
+aws sts get-caller-identity --profile fiap-fase4
 ```
 
-Vai pedir, em sequência (digite direto no terminal):
-1. **AWS Access Key ID**
-2. **AWS Secret Access Key**
-3. **Default region name** → `us-east-2`
-4. **Default output format** → `json` (ou vazio)
+Se você já tiver rodado `aws login` (SSO) nesta sessão, limpe variáveis
+residuais — elas têm prioridade sobre `--profile`:
 
-Teste:
-```powershell
-aws sts get-caller-identity --profile <nome-do-profile>
+```bash
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_CREDENTIAL_EXPIRATION
 ```
 
-Se você já tiver rodado `aws login` (SSO) antes nesta mesma sessão de terminal, limpe as
-variáveis de ambiente residuais — elas têm prioridade sobre `--profile` e podem estar
-expiradas:
-```powershell
-Remove-Item Env:\AWS_ACCESS_KEY_ID, Env:\AWS_SECRET_ACCESS_KEY, Env:\AWS_SESSION_TOKEN, Env:\AWS_CREDENTIAL_EXPIRATION -ErrorAction SilentlyContinue
-```
+## 3. Bucket do state e init
 
-## 3. Inicializar
+O backend S3 não tem bucket fixo (nome de bucket é global e muda por conta).
+Crie o bucket uma vez (ver o guia) e informe no init:
 
-```powershell
+```bash
 cd terraform
-terraform init
+terraform init -backend-config="bucket=<SEU_BUCKET_DE_STATE>"
 ```
 
 ## 4. Plan / Apply
 
-### Opção A — sem tfvars (usa os defaults de `variables.tf` + flag de profile)
-
-```powershell
-terraform plan  -var="aws_profile=<nome-do-profile>"
-terraform apply -var="aws_profile=<nome-do-profile>"
+```bash
+terraform plan  -var="aws_profile=fiap-fase4"
+terraform apply -var="aws_profile=fiap-fase4"
 ```
 
-### Opção B — com `manual.tfvars` (já vem com `aws_profile` preenchido)
+Ou crie um `terraform.tfvars` (ignorado pelo Git) com `aws_profile = "fiap-fase4"`.
+O [manual.tfvars](manual.tfvars) é um exemplo e só é lido com `-var-file`.
 
-```powershell
-terraform plan  -var-file="manual.tfvars"
-terraform apply -var-file="manual.tfvars"
-```
+Variáveis úteis:
 
-Edite [manual.tfvars](manual.tfvars) se o nome do seu profile for diferente de `adanmartinez`.
-Esse arquivo não é carregado automaticamente (só `terraform.tfvars`/`*.auto.tfvars` são) —
-precisa sempre do `-var-file`.
+| Variável | Padrão | Para quê |
+|----------|--------|----------|
+| `kubernetes_version` | `1.35` | precisa estar em standard support (`aws eks describe-cluster-versions`) |
+| `node_desired_size` | `3` | 5 serviços + ArgoCD + stack de observabilidade |
+| `eks_admin_principal_arns` | `[]` | ARNs IAM extras com admin no cluster (colegas, role do self-healing) |
 
-### Opção C — fixar de vez (sem repetir flag)
+## 5. Problemas já conhecidos
 
-Renomeie/crie `terraform.tfvars` com `aws_profile = "<nome-do-profile>"`. Esse arquivo É
-carregado automaticamente pelo Terraform, então depois disso basta `terraform apply`.
-
-## 5. Problemas já conhecidos deste projeto
-
-- **Node group falha com "AMI not supported"**: já corrigido — `c7i-flex.large` exige
-  `ami_type = "AL2023_x86_64_STANDARD"` (ver [modules/eks/main.tf](modules/eks/main.tf)).
-- **RDS "Cannot find version"**: a versão do Postgres em `rds_engine_version` precisa
-  existir na região; confira com:
-  ```powershell
-  aws rds describe-db-engine-versions --engine postgres --region us-east-2 --query "DBEngineVersions[].EngineVersion" --output table
-  ```
-- **KEDA falha por webhook do ALB sem endpoints**: já corrigido com `depends_on` explícito
+- **Node group falha com "AMI not supported"**: `c7i-flex.large` exige
+  `ami_type = "AL2023_x86_64_STANDARD"` (já configurado em [modules/eks/main.tf](modules/eks/main.tf)).
+- **Node group não sobe / `VcpuLimitExceeded`**: conta nova costuma ter cota baixa de
+  vCPU on-demand. Veja a seção 2.8 do guia.
+- **KEDA falha por webhook do ALB sem endpoints**: resolvido com `depends_on`
   do Helm release do KEDA no do ALB controller.
-- **`kubectl_manifest` trava ~10min e falha com "context deadline exceeded"**: os
-  Deployments têm `wait_for_rollout = false` (ver
-  [modules/k8s-manifests/main.tf](modules/k8s-manifests/main.tf)) porque os repositórios
-  ECR são criados vazios — os pods ficam em `ImagePullBackOff` até você buildar e publicar
-  as imagens (README principal, seções 5.4 em diante).
-- **Apply falha no meio com "Failed to save state" / `errored.tfstate`**: normalmente por
-  credencial expirada durante um apply longo. Recupere com:
-  ```powershell
+- **Apply falha no meio com "Failed to save state" / `errored.tfstate`**:
+  normalmente credencial expirada. Recupere com:
+  ```bash
   terraform state push errored.tfstate
   # se der "Error acquiring the state lock":
   terraform force-unlock -force <LockID-do-erro>
   ```
-  Depois rode `terraform apply` de novo — é idempotente, só cria o que falta.
+  Depois rode `terraform apply` de novo — é idempotente.
 
 ## 6. Destruir tudo
 
-```powershell
-terraform destroy -var-file="manual.tfvars"
+Antes, remova os recursos criados por controllers do cluster (ALB e discos
+EBS), senão o destroy da VPC trava. O guia tem a sequência completa:
+
+```bash
+kubectl delete ingress --all -A
+kubectl delete pvc --all -n observability
+terraform destroy -var="aws_profile=fiap-fase4"
 ```

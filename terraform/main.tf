@@ -43,6 +43,7 @@ module "eks" {
   node_min_size        = var.node_min_size
   node_max_size        = var.node_max_size
   node_desired_size    = var.node_desired_size
+  admin_principal_arns = var.eks_admin_principal_arns
   tags                 = local.tags
 }
 
@@ -73,10 +74,10 @@ module "rds" {
   vpc_id                    = module.vpc.vpc_id
   private_subnet_ids        = module.vpc.private_subnet_ids
   cluster_security_group_id = module.eks.cluster_security_group_id
-  engine_version             = var.rds_engine_version
-  instance_class             = var.rds_instance_class
-  allocated_storage          = var.rds_allocated_storage
-  tags                       = local.tags
+  engine_version            = var.rds_engine_version
+  instance_class            = var.rds_instance_class
+  allocated_storage         = var.rds_allocated_storage
+  tags                      = local.tags
 }
 
 module "elasticache" {
@@ -105,29 +106,31 @@ module "irsa" {
   oidc_provider_arn = module.eks.oidc_provider_arn
   oidc_provider_url = module.eks.oidc_provider_url
 
-  alb_iam_policy_json                    = local.alb_iam_policy_json
-  auth_database_url_secret_arn           = module.secrets.auth_database_url_arn
-  auth_master_key_secret_arn             = module.secrets.auth_master_key_arn
-  flag_database_url_secret_arn           = module.secrets.flag_database_url_arn
-  targeting_database_url_secret_arn      = module.secrets.targeting_database_url_arn
-  evaluation_redis_url_secret_arn        = module.secrets.evaluation_redis_url_arn
+  alb_iam_policy_json                   = local.alb_iam_policy_json
+  auth_database_url_secret_arn          = module.secrets.auth_database_url_arn
+  auth_master_key_secret_arn            = module.secrets.auth_master_key_arn
+  flag_database_url_secret_arn          = module.secrets.flag_database_url_arn
+  targeting_database_url_secret_arn     = module.secrets.targeting_database_url_arn
+  evaluation_redis_url_secret_arn       = module.secrets.evaluation_redis_url_arn
   evaluation_service_api_key_secret_arn = module.secrets.evaluation_service_api_key_arn
-  sqs_queue_arn                          = module.sqs.queue_arn
-  dynamodb_table_arn                     = module.dynamodb.table_arn
-  tags                                    = local.tags
+  sqs_queue_arn                         = module.sqs.queue_arn
+  dynamodb_table_arn                    = module.dynamodb.table_arn
+  datadog_api_key_secret_arn            = module.secrets.datadog_api_key_arn
+  grafana_admin_secret_arn              = module.secrets.grafana_admin_arn
+  tags                                  = local.tags
 }
 
 module "k8s_addons" {
   source = "./modules/k8s-addons"
 
-  cluster_name                          = module.eks.cluster_name
-  aws_region                            = var.aws_region
-  vpc_id                                = module.vpc.vpc_id
+  cluster_name                           = module.eks.cluster_name
+  aws_region                             = var.aws_region
+  vpc_id                                 = module.vpc.vpc_id
   alb_serviceaccount_yaml                = local.alb_serviceaccount_yaml
   keda_role_arn                          = module.irsa.role_arns["keda-operator-role"]
-  alb_controller_chart_version            = var.alb_controller_chart_version
-  keda_chart_version                      = var.keda_chart_version
-  secrets_store_csi_driver_chart_version  = var.secrets_store_csi_driver_chart_version
+  alb_controller_chart_version           = var.alb_controller_chart_version
+  keda_chart_version                     = var.keda_chart_version
+  secrets_store_csi_driver_chart_version = var.secrets_store_csi_driver_chart_version
 
   # Sem depends_on aqui: o provider kubectl/helm/kubernetes já depende de
   # module.eks (host/token), e keda_role_arn já força a dependência de

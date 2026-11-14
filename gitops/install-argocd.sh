@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ARGOCD_NS="argocd"
-CHART_VERSION="7.7.11"   # linha 7.7.x (Helm chart argo/argo-cd)
+CHART_VERSION="10.18.0"  # Helm chart argo/argo-cd (Argo CD v3.6)
 
 for t in helm kubectl; do
   command -v "$t" >/dev/null 2>&1 || { echo "FALTANDO: $t"; exit 1; }

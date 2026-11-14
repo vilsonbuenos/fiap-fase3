@@ -1,0 +1,40 @@
+# Loki monolítico (SingleBinary) com disco EBS.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: 7.6.0
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/gitops/observability/values/loki.yaml
+    - repoURL: https://github.com/vilsonbuenos/fiap-fase3.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # A root-app cria todas as Applications quase ao mesmo tempo; se um CRD de
+    # outra Application (ex.: ServiceMonitor do kube-prometheus-stack) ainda não
+    # existir, o sync falha e é refeito com backoff em vez de ficar parado.
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

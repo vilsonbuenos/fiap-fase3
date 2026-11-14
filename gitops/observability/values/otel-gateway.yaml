@@ -1,0 +1,201 @@
+# OTel Collector "gateway": peça central da telemetria.
+#   apps (OTLP) ---------------------> gateway --> Prometheus (métricas)
+#   otel-agent (logs dos containers) -> gateway --> Loki (logs)
+#                                         gateway --> Datadog (traces + APM stats)
+# Detalhes e justificativa: docs/fase4/02-arquitetura-otel.md
+mode: deployment
+replicaCount: 1
+fullnameOverride: otel-gateway
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+command:
+  name: otelcol-contrib
+
+# IRSA: a role só lê o secret observability/DATADOG_API_KEY
+serviceAccount:
+  create: true
+  name: otel-gateway
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::640494160208:role/otel-gateway-role
+
+# k8s_attributes: enriquece traces/métricas/logs com namespace, pod, deployment
+# e node (associação pelo IP de origem da conexão ou pelo k8s.pod.uid do agent).
+presets:
+  kubernetesAttributes:
+    enabled: true
+
+ports:
+  otlp:
+    enabled: true
+  otlp-http:
+    enabled: true
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+  metrics:
+    enabled: true
+
+# Métricas internas do collector (otelcol_*) no Prometheus
+serviceMonitor:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
+
+extraEnvs:
+  - name: DD_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: datadog-api-key
+        key: api-key
+  # Site da sua conta Datadog (datadoghq.com, us3.datadoghq.com, us5.datadoghq.com, datadoghq.eu...)
+  - name: DD_SITE
+    value: datadoghq.com
+  - name: K8S_CLUSTER_NAME
+    value: eks-tc3-prod-001
+
+# O volume CSI faz o driver sincronizar o Secret "datadog-api-key" a partir do
+# Secrets Manager (SecretProviderClass em gitops/observability/config).
+extraVolumes:
+  - name: secrets-store-inline
+    csi:
+      driver: secrets-store.csi.k8s.io
+      readOnly: true
+      volumeAttributes:
+        secretProviderClass: datadog-api-key
+extraVolumeMounts:
+  - name: secrets-store-inline
+    mountPath: /mnt/secrets-store
+    readOnly: true
+
+# Config completa (não é mesclada com o default do chart). O preset acima
+# injeta a definição do processor k8s_attributes.
+alternateConfig:
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+
+  processors:
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+
+    resource/cluster:
+      attributes:
+        - key: k8s.cluster.name
+          value: ${env:K8S_CLUSTER_NAME}
+          action: upsert
+        - key: deployment.environment.name
+          value: prod
+          action: insert
+        # Chave antiga: algumas versões do mapeamento de "env" do Datadog só leem esta
+        - key: deployment.environment
+          value: prod
+          action: insert
+
+    # Copia atributos de resource para o datapoint: viram labels no Prometheus
+    # sem converter todos os atributos (resource_to_telemetry_conversion), o
+    # que explodiria a cardinalidade.
+    transform/promote:
+      error_mode: ignore
+      metric_statements:
+        - context: datapoint
+          statements:
+            - set(attributes["service.name"], resource.attributes["service.name"]) where resource.attributes["service.name"] != nil
+            - set(attributes["k8s.namespace.name"], resource.attributes["k8s.namespace.name"]) where resource.attributes["k8s.namespace.name"] != nil
+            - set(attributes["k8s.pod.name"], resource.attributes["k8s.pod.name"]) where resource.attributes["k8s.pod.name"] != nil
+
+    batch:
+      send_batch_size: 1024
+      timeout: 5s
+
+  connectors:
+    # Gera métricas RED (taxa, erros, duração) a partir dos spans. Mesmos nomes
+    # para Go e Python, independente da lib de instrumentação.
+    span_metrics:
+      namespace: traces.span.metrics
+      metrics_flush_interval: 15s
+      histogram:
+        unit: ms
+        explicit:
+          buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2500ms, 5s]
+      dimensions:
+        - name: http.request.method
+        - name: http.response.status_code
+        - name: http.route
+        - name: server.address
+      exemplars:
+        enabled: false
+
+    # Calcula as estatísticas de APM (hits, erros, latência) que o Datadog usa
+    # no Service Map e nas páginas de serviço.
+    datadog/connector:
+      traces:
+        compute_stats_by_span_kind: true
+        peer_tags_aggregation: true
+
+  exporters:
+    prometheus_remote_write:
+      endpoint: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write
+      resource_to_telemetry_conversion:
+        enabled: false
+
+    otlp_http/loki:
+      endpoint: http://loki.observability.svc.cluster.local:3100/otlp
+
+    datadog:
+      api:
+        key: ${env:DD_API_KEY}
+        site: ${env:DD_SITE}
+      # Fallback para payloads sem atributo de host; evita esperar a detecção via IMDS
+      hostname: ${env:OTEL_K8S_NODE_NAME}
+
+  service:
+    extensions: [health_check]
+    telemetry:
+      metrics:
+        readers:
+          - pull:
+              exporter:
+                prometheus:
+                  host: ${env:MY_POD_IP}
+                  port: 8888
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/cluster, batch]
+        exporters: [span_metrics, datadog/connector, datadog]
+
+      metrics:
+        receivers: [otlp, span_metrics]
+        processors: [memory_limiter, k8s_attributes, resource/cluster, transform/promote, batch]
+        exporters: [prometheus_remote_write]
+
+      metrics/datadog:
+        receivers: [datadog/connector]
+        processors: [batch]
+        exporters: [datadog]
+
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/cluster, batch]
+        exporters: [otlp_http/loki]

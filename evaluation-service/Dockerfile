@@ -5,9 +5,9 @@
 # de produção mínima (~10 MB) sem compilador, código-fonte ou cache de módulos.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Usa a imagem oficial Go 1.21 baseada em Alpine (Linux mínimo ~5 MB).
+# Usa a imagem oficial Go 1.27 baseada em Alpine (as libs OpenTelemetry exigem Go >= 1.26).
 # O alias "builder" permite que o Stage 2 referencie este estágio via --from=builder.
-FROM golang:1.21-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 # Instala o git via gerenciador de pacotes Alpine.
 # --no-cache : não salva o índice de pacotes na imagem (economiza espaço).
@@ -37,6 +37,9 @@ RUN go mod download
 # Feito após o download para que mudanças no código não invalidem o cache de módulos.
 COPY *.go ./
 
+# Completa go.mod/go.sum com as dependências indiretas (o go.sum não é versionado).
+RUN go mod tidy
+
 # Compila o binário estático para Linux.
 # CGO_ENABLED=0       : desabilita o CGo, gerando um binário puramente estático
 #                       (sem dependência de libc). Obrigatório para rodar em Alpine
@@ -59,8 +62,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # Resultado: imagem final sem compilador Go, sem código-fonte, sem módulos.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Alpine 3.19 como base de runtime (~5 MB). Muito menor que a imagem golang (~300 MB).
-FROM alpine:3.19
+# Alpine 3.24 como base de runtime (~5 MB). Muito menor que a imagem golang (~300 MB).
+FROM alpine:3.24
 
 # Instala dois pacotes essenciais para aplicações de produção:
 # ca-certificates : certificados TLS raiz, necessários para conexões HTTPS/TLS
@@ -97,7 +100,7 @@ EXPOSE 8004
 # --retries=3       : após 3 falhas consecutivas o container é marcado "unhealthy".
 # wget está disponível no Alpine por padrão; -qO- suprime output e lê o corpo.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://localhost:8004/health || exit 1
+    CMD wget -qO- http://localhost:8004/evaluation/health || exit 1
 
 # ENTRYPOINT (diferente de CMD): o binário é sempre executado e não pode ser
 # substituído por argumentos passados no "docker run". Garante que o container

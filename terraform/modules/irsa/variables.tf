@@ -43,6 +43,14 @@ variable "dynamodb_table_arn" {
   type = string
 }
 
+variable "datadog_api_key_secret_arn" {
+  type = string
+}
+
+variable "grafana_admin_secret_arn" {
+  type = string
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

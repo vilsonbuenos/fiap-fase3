@@ -1,0 +1,34 @@
+# Namespace, SecretProviderClasses e dashboards da stack de observabilidade.
+# Wave -1: precisa existir antes dos pods do Grafana e do otel-gateway.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/vilsonbuenos/fiap-fase3.git
+    targetRevision: main
+    path: gitops/observability/config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # A root-app cria todas as Applications quase ao mesmo tempo; se um CRD de
+    # outra Application (ex.: ServiceMonitor do kube-prometheus-stack) ainda não
+    # existir, o sync falha e é refeito com backoff em vez de ficar parado.
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

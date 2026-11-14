@@ -23,9 +23,15 @@ variable "cluster_name" {
 }
 
 variable "kubernetes_version" {
-  description = "Versão do Kubernetes do EKS"
+  description = "Versão do Kubernetes do EKS (precisa estar em standard support: aws eks describe-cluster-versions)"
   type        = string
-  default     = "1.30"
+  default     = "1.35"
+}
+
+variable "eks_admin_principal_arns" {
+  description = "ARNs IAM (users/roles) extras com acesso admin ao cluster, ex.: colegas do grupo ou a role do self-healing"
+  type        = list(string)
+  default     = []
 }
 
 # ---------------------------------------------------------------------------
@@ -83,8 +89,9 @@ variable "node_max_size" {
 }
 
 variable "node_desired_size" {
-  type    = number
-  default = 2
+  description = "3 nodes: os 5 serviços + ArgoCD + KEDA + Prometheus/Loki/Grafana/OTel não cabem em 2x c7i-flex.large"
+  type        = number
+  default     = 3
 }
 
 # ---------------------------------------------------------------------------
@@ -118,8 +125,9 @@ variable "dynamodb_analytics_table_name" {
 # ---------------------------------------------------------------------------
 
 variable "rds_engine_version" {
-  type    = string
-  default = "17.5"
+  description = "Só a major: a AWS escolhe a minor default da região (minors antigas são descontinuadas)"
+  type        = string
+  default     = "17"
 }
 
 variable "rds_instance_class" {
@@ -147,17 +155,17 @@ variable "redis_node_type" {
 
 variable "alb_controller_chart_version" {
   type    = string
-  default = "1.8.2"
+  default = "3.6.3"
 }
 
 variable "keda_chart_version" {
   type    = string
-  default = "2.15.1"
+  default = "2.21.0"
 }
 
 variable "secrets_store_csi_driver_chart_version" {
   type    = string
-  default = "1.4.5"
+  default = "1.6.2"
 }
 
 # ---------------------------------------------------------------------------

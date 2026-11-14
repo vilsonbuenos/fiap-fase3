@@ -22,6 +22,14 @@ output "evaluation_service_api_key_arn" {
   value = aws_secretsmanager_secret.evaluation_service_api_key.arn
 }
 
+output "datadog_api_key_arn" {
+  value = aws_secretsmanager_secret.datadog_api_key.arn
+}
+
+output "grafana_admin_arn" {
+  value = aws_secretsmanager_secret.grafana_admin.arn
+}
+
 # Referências agregadas às secret_version, usadas apenas para forçar
 # dependência de ordenação a partir de outros módulos (ex: k8s-manifests)
 output "version_ids" {
@@ -32,5 +40,7 @@ output "version_ids" {
     aws_secretsmanager_secret_version.targeting_database_url.version_id,
     aws_secretsmanager_secret_version.evaluation_redis_url.version_id,
     aws_secretsmanager_secret_version.evaluation_service_api_key.version_id,
+    aws_secretsmanager_secret_version.datadog_api_key.version_id,
+    aws_secretsmanager_secret_version.grafana_admin.version_id,
   ]
 }

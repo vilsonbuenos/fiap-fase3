@@ -1,0 +1,105 @@
+# OTel Collector "agent" (DaemonSet, 1 pod por node): lê os logs de TODOS os
+# containers do node em /var/log/pods e encaminha ao gateway via OTLP.
+# Não recebe telemetria das apps (elas falam direto com o gateway).
+mode: daemonset
+fullnameOverride: otel-agent
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+command:
+  name: otelcol-contrib
+
+presets:
+  # file_log em /var/log/pods/*/*/*.log + parser de container (CRI)
+  logsCollection:
+    enabled: true
+  # k8s_attributes filtrado pelo node do agent
+  kubernetesAttributes:
+    enabled: true
+
+ports:
+  otlp:
+    enabled: false
+  otlp-http:
+    enabled: false
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+  metrics:
+    enabled: true
+
+podMonitor:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+tolerations:
+  - operator: Exists
+
+alternateConfig:
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+
+  processors:
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+
+    # Os serviços escrevem "trace_id=<32 hex> span_id=<16 hex>" em cada linha de
+    # log dentro de uma requisição. Aqui isso vira o TraceId/SpanId do log
+    # record, que o Loki guarda como structured metadata (trace_id / span_id).
+    # Também deduz a severidade pelo texto (os serviços logam em texto puro),
+    # o que habilita o filtro por nível e as cores no Grafana/Loki.
+    transform/trace_context:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - set(cache["m"], ExtractPatterns(body, "trace_id=(?P<trace_id>[0-9a-f]{32}) span_id=(?P<span_id>[0-9a-f]{16})")) where IsString(body)
+            - set(trace_id.string, cache["m"]["trace_id"]) where cache["m"]["trace_id"] != nil
+            - set(span_id.string, cache["m"]["span_id"]) where cache["m"]["span_id"] != nil
+            - set(severity_number, SEVERITY_NUMBER_INFO) where IsString(body)
+            - set(severity_number, SEVERITY_NUMBER_WARN) where IsString(body) and IsMatch(body, "(?i)\\b(warn|warning|aviso)\\b")
+            - set(severity_number, SEVERITY_NUMBER_ERROR) where IsString(body) and IsMatch(body, "(?i)\\b(error|erro|critical|fatal|panic)\\b")
+            # Minúsculas: é o padrão do detected_level do Loki (error, warn, info)
+            - set(severity_text, "info") where severity_number == SEVERITY_NUMBER_INFO
+            - set(severity_text, "warn") where severity_number == SEVERITY_NUMBER_WARN
+            - set(severity_text, "error") where severity_number == SEVERITY_NUMBER_ERROR
+
+    batch:
+      send_batch_size: 1024
+      timeout: 5s
+
+  exporters:
+    otlp_grpc/gateway:
+      endpoint: otel-gateway.observability.svc.cluster.local:4317
+      tls:
+        insecure: true
+
+  service:
+    extensions: [health_check]
+    telemetry:
+      metrics:
+        readers:
+          - pull:
+              exporter:
+                prometheus:
+                  host: ${env:MY_POD_IP}
+                  port: 8888
+    pipelines:
+      logs:
+        receivers: [file_log]
+        processors: [memory_limiter, k8s_attributes, transform/trace_context, batch]
+        exporters: [otlp_grpc/gateway]

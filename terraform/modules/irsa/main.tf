@@ -1,13 +1,16 @@
 locals {
   # role_name => { namespace, service_account }
   irsa_service_accounts = {
-    "auth-service-secrets-role"          = { namespace = "auth-service", sa = "auth-service" }
-    "flag-service-secrets-role"          = { namespace = "flag-service", sa = "flag-service" }
-    "targeting-service-secrets-role"     = { namespace = "targeting-service", sa = "targeting-service" }
-    "evaluation-service-secrets-role"    = { namespace = "evaluation-service", sa = "evaluation-service" }
-    "analytics-service-role"             = { namespace = "analytics-service", sa = "analytics-service" }
-    "aws-load-balancer-controller-role"  = { namespace = "kube-system", sa = "aws-load-balancer-controller" }
-    "keda-operator-role"                 = { namespace = "keda", sa = "keda-operator" }
+    "auth-service-secrets-role"         = { namespace = "auth-service", sa = "auth-service" }
+    "flag-service-secrets-role"         = { namespace = "flag-service", sa = "flag-service" }
+    "targeting-service-secrets-role"    = { namespace = "targeting-service", sa = "targeting-service" }
+    "evaluation-service-secrets-role"   = { namespace = "evaluation-service", sa = "evaluation-service" }
+    "analytics-service-role"            = { namespace = "analytics-service", sa = "analytics-service" }
+    "aws-load-balancer-controller-role" = { namespace = "kube-system", sa = "aws-load-balancer-controller" }
+    "keda-operator-role"                = { namespace = "keda", sa = "keda-operator" }
+    "ebs-csi-driver-role"               = { namespace = "kube-system", sa = "ebs-csi-controller-sa" }
+    "otel-gateway-role"                 = { namespace = "observability", sa = "otel-gateway" }
+    "grafana-role"                      = { namespace = "observability", sa = "grafana" }
   }
 }
 
@@ -194,4 +197,51 @@ resource "aws_iam_policy" "alb_controller" {
 resource "aws_iam_role_policy_attachment" "alb_controller" {
   role       = aws_iam_role.this["aws-load-balancer-controller-role"].name
   policy_arn = aws_iam_policy.alb_controller.arn
+}
+
+# ---------------------------------------------------------------------------
+# Fase 4: discos EBS (PVC do Prometheus/Loki) e observabilidade
+# ---------------------------------------------------------------------------
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
+  role       = aws_iam_role.this["ebs-csi-driver-role"].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+data "aws_iam_policy_document" "otel_gateway" {
+  statement {
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [var.datadog_api_key_secret_arn]
+  }
+}
+
+resource "aws_iam_policy" "otel_gateway" {
+  name   = "otel-gateway-secrets-policy"
+  policy = data.aws_iam_policy_document.otel_gateway.json
+  tags   = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "otel_gateway" {
+  role       = aws_iam_role.this["otel-gateway-role"].name
+  policy_arn = aws_iam_policy.otel_gateway.arn
+}
+
+data "aws_iam_policy_document" "grafana" {
+  statement {
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [var.grafana_admin_secret_arn]
+  }
+}
+
+resource "aws_iam_policy" "grafana" {
+  name   = "grafana-secrets-policy"
+  policy = data.aws_iam_policy_document.grafana.json
+  tags   = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "grafana" {
+  role       = aws_iam_role.this["grafana-role"].name
+  policy_arn = aws_iam_policy.grafana.arn
 }

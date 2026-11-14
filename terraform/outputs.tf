@@ -22,6 +22,14 @@ output "eks_oidc_provider_arn" {
   value = module.eks.oidc_provider_arn
 }
 
+output "account_id" {
+  value = data.aws_caller_identity.current.account_id
+}
+
+output "ecr_registry" {
+  value = module.ecr.registry
+}
+
 output "ecr_repository_urls" {
   value = module.ecr.repository_urls
 }
@@ -52,6 +60,5 @@ output "update_kubeconfig_command" {
 }
 
 output "next_manual_step" {
-  value = "Após o apply, crie a API key do evaluation-service via POST /auth/admin/keys e atualize o secret evaluation-service/SERVICE_API_KEY com 'aws secretsmanager put-secret-value'."
+  value = "Siga docs/fase4/01-setup-aws-do-zero.md: build/push das imagens, ArgoCD, bootstrap-app-data.sh (tabelas + SERVICE_API_KEY) e a chave do Datadog em observability/DATADOG_API_KEY."
 }
-

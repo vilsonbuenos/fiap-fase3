@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/gustavocalce/fiap-fase3-tmm-iac.git
+    repoURL: https://github.com/vilsonbuenos/fiap-fase3.git
     targetRevision: main
     path: gitops/apps/evaluation-service
   destination:

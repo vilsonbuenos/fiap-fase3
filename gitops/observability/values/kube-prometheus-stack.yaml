@@ -1,0 +1,156 @@
+# kube-prometheus-stack: Prometheus + Grafana + Alertmanager + node-exporter +
+# kube-state-metrics. As métricas de infraestrutura vêm do scrape nativo do
+# Prometheus; as métricas das aplicações chegam via OTel Collector (remote write).
+fullnameOverride: kube-prometheus-stack
+
+crds:
+  enabled: true
+
+# Componentes do control plane não são acessíveis no EKS gerenciado.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+windowsMonitoring:
+  enabled: false
+
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    windows: false
+
+# Os webhooks de admissão dependem de Jobs de certificado (hooks Helm) que o
+# ArgoCD re-executa a cada sync; sem eles o operator funciona igual.
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      memory: 256Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+
+prometheus:
+  prometheusSpec:
+    # Endpoint /api/v1/write para o exporter prometheus_remote_write do OTel
+    enableRemoteWriteReceiver: true
+    scrapeInterval: 30s
+    retention: 3d
+    retentionSize: 8GB
+    # Seleciona ServiceMonitor/PodMonitor/PrometheusRule de qualquer namespace
+    # (o OTel Collector e os alertas do grupo não carregam o label do release).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 768Mi
+      limits:
+        memory: 1536Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 192Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+grafana:
+  # IRSA: a role só lê o secret observability/GRAFANA_ADMIN
+  serviceAccount:
+    create: true
+    name: grafana
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::640494160208:role/grafana-role
+
+  # Usuário/senha vêm do Secrets Manager. O volume CSI abaixo faz o driver
+  # sincronizar o Secret "grafana-admin" (SecretProviderClass em
+  # gitops/observability/config).
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+  extraSecretMounts:
+    - name: secrets-store-inline
+      mountPath: /mnt/secrets-store
+      readOnly: true
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: grafana-admin
+
+  # Dashboards e datasources são provisionados do Git; não há estado a guardar.
+  persistence:
+    enabled: false
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 512Mi
+
+  defaultDashboardsTimezone: browser
+
+  # Pod de "helm test": não tem uso no ArgoCD
+  testFramework:
+    enabled: false
+
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      jsonData:
+        maxLines: 1000
