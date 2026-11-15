@@ -9,4 +9,4 @@ resources:
   - ingress.yaml
 images:
   - name: 574644334976.dkr.ecr.us-east-2.amazonaws.com/fiap-fase2/auth-service
-    newTag: "1.0.3"
+    newTag: "8925453"
