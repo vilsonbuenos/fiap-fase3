@@ -17,7 +17,7 @@ serviceAccount:
   create: true
   name: otel-gateway
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::640494160208:role/otel-gateway-role
+    eks.amazonaws.com/role-arn: arn:aws:iam::574644334976:role/otel-gateway-role
 
 # k8s_attributes: enriquece traces/métricas/logs com namespace, pod, deployment
 # e node (associação pelo IP de origem da conexão ou pelo k8s.pod.uid do agent).

@@ -100,7 +100,7 @@ grafana:
     create: true
     name: grafana
     annotations:
-      eks.amazonaws.com/role-arn: arn:aws:iam::640494160208:role/grafana-role
+      eks.amazonaws.com/role-arn: arn:aws:iam::574644334976:role/grafana-role
 
   # Usuário/senha vêm do Secrets Manager. O volume CSI abaixo faz o driver
   # sincronizar o Secret "grafana-admin" (SecretProviderClass em

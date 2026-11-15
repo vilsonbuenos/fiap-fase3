@@ -15,6 +15,6 @@ spec:
     authenticationRef:
       name: keda-aws-auth
     metadata:
-      queueURL: https://sqs.us-east-2.amazonaws.com/640494160208/ToggleMasterQueue
+      queueURL: https://sqs.us-east-2.amazonaws.com/574644334976/ToggleMasterQueue
       queueLength: "5"
       awsRegion: us-east-2

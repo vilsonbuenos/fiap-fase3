@@ -18,7 +18,7 @@ spec:
       serviceAccountName: analytics-service
       containers:
       - name: analytics-service
-        image: 640494160208.dkr.ecr.us-east-2.amazonaws.com/fiap-fase2/analytics-service:1.0.1
+        image: 574644334976.dkr.ecr.us-east-2.amazonaws.com/fiap-fase2/analytics-service:1.0.1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8005
@@ -38,7 +38,7 @@ spec:
         - name: AWS_REGION
           value: "us-east-2"
         - name: AWS_SQS_URL
-          value: "https://sqs.us-east-2.amazonaws.com/640494160208/ToggleMasterQueue"
+          value: "https://sqs.us-east-2.amazonaws.com/574644334976/ToggleMasterQueue"
         - name: AWS_DYNAMODB_TABLE
           value: "ToggleMasterAnalytics"
         livenessProbe:
