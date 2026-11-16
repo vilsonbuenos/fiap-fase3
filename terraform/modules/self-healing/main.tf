@@ -55,9 +55,14 @@ resource "aws_iam_role" "self_healing" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = [
-            for b in var.allowed_branches : "repo:${var.github_repository}:ref:refs/heads/${b}"
-          ]
+          # Aceita o formato clássico (repo:owner/nome) e, se informado, o formato
+          # imutável (repo:owner@id/nome@id), que o GitHub usa em repos novos.
+          "token.actions.githubusercontent.com:sub" = flatten([
+            for b in var.allowed_branches : compact([
+              "repo:${var.github_repository}:ref:refs/heads/${b}",
+              var.github_immutable_subject_prefix == "" ? "" : "${var.github_immutable_subject_prefix}:ref:refs/heads/${b}",
+            ])
+          ])
         }
       }
     }]

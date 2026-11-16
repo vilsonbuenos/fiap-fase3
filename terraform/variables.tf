@@ -193,3 +193,9 @@ variable "create_github_oidc_provider" {
   type        = bool
   default     = true
 }
+
+variable "github_immutable_subject_prefix" {
+  description = "sub_claim_prefix do OIDC do GitHub para o repositório (formato imutável owner@id/repo@id)"
+  type        = string
+  default     = "repo:vilsonbuenos@101294893/fiap-fase4@1458071301"
+}
