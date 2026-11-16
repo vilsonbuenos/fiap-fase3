@@ -29,3 +29,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "github_immutable_subject_prefix" {
+  description = "Prefixo do sub imutável do OIDC (gh api repos/<repo>/actions/oidc/customization/sub -> sub_claim_prefix). Vazio = só o formato clássico."
+  type        = string
+  default     = ""
+}

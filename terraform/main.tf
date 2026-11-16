@@ -144,10 +144,11 @@ module "k8s_addons" {
 module "self_healing" {
   source = "./modules/self-healing"
 
-  cluster_name                = module.eks.cluster_name
-  github_repository           = var.github_repository
-  create_github_oidc_provider = var.create_github_oidc_provider
-  tags                        = local.tags
+  cluster_name                    = module.eks.cluster_name
+  github_repository               = var.github_repository
+  github_immutable_subject_prefix = var.github_immutable_subject_prefix
+  create_github_oidc_provider     = var.create_github_oidc_provider
+  tags                            = local.tags
 }
 
 # DESLIGADO: os 5 workloads passaram a ser gerenciados pelo ArgoCD (GitOps),
