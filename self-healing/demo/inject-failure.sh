@@ -42,7 +42,7 @@ echo "   Esperado: 500 até o self-healing agir; depois 401 (chave inválida = n
 end=$((SECONDS + MINUTES * 60))
 while (( SECONDS < end )); do
   codes=()
-  for i in $(seq 1 10); do
+  for _ in $(seq 1 10); do
     codes+=("$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer demo-key-invalida' "${BASE}/auth/validate")")
   done
   n500=$(printf '%s\n' "${codes[@]}" | grep -c '^5' || true)
