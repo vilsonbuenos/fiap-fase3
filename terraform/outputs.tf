@@ -62,3 +62,8 @@ output "update_kubeconfig_command" {
 output "next_manual_step" {
   value = "Siga docs/fase4/01-setup-aws-do-zero.md: build/push das imagens, ArgoCD, bootstrap-app-data.sh (tabelas + SERVICE_API_KEY) e a chave do Datadog em observability/DATADOG_API_KEY."
 }
+
+output "self_healing_role_arn" {
+  description = "Cadastrar como variável SELF_HEALING_ROLE_ARN no GitHub (Settings > Secrets and variables > Actions > Variables)"
+  value       = module.self_healing.role_arn
+}

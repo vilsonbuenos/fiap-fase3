@@ -68,12 +68,19 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/health", app.healthHandler)
 
+	// Injeção de falha para a demo do Self-Healing (só com CHAOS_ENABLED=true; ver chaos.go)
+	faults := &chaos{}
+	if chaosEnabled() {
+		mux.Handle("/auth/admin/chaos", app.masterKeyAuthMiddleware(http.HandlerFunc(faults.handler)))
+		log.Println("CHAOS_ENABLED=true: endpoint /auth/admin/chaos disponível")
+	}
+
 	// Endpoint público para validar uma chave
-	mux.HandleFunc("/auth/validate", app.validateKeyHandler)
+	mux.Handle("/auth/validate", faults.wrap(http.HandlerFunc(app.validateKeyHandler)))
 
 	// Endpoints de "admin" para criar/gerenciar chaves
 	// Eles são protegidos pelo middleware de autenticação
-	mux.Handle("/auth/admin/keys", app.masterKeyAuthMiddleware(http.HandlerFunc(app.createKeyHandler)))
+	mux.Handle("/auth/admin/keys", faults.wrap(app.masterKeyAuthMiddleware(http.HandlerFunc(app.createKeyHandler))))
 
 	// Cada requisição vira um span de servidor (contexto W3C propagado pelo
 	// chamador). Health checks do kubelet/ALB ficam fora para não poluir.

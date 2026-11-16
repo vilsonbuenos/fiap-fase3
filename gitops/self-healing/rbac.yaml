@@ -1,0 +1,110 @@
+# RBAC do Self-Healing: o que a role IAM do GitHub Actions pode fazer no cluster.
+# A role entra como membro do grupo "togglemaster:self-healing" (EKS access
+# entry criado pelo Terraform em terraform/modules/self-healing).
+#
+# Permissões mínimas para o runbook self-healing/scripts/selfheal.sh:
+#   - get/patch deployments          -> kubectl rollout restart
+#   - list/watch rs + pods           -> kubectl rollout status / get pods
+#   - list events                    -> diagnóstico
+#   - get services/proxy             -> health check pós-restart
+# Nada de delete, exec, secrets ou acesso a outros namespaces.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: togglemaster-self-healing
+  labels:
+    app.kubernetes.io/part-of: self-healing
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["get"]
+---
+# O ClusterRole só vale nos namespaces abaixo (RoleBinding, não ClusterRoleBinding)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healing
+  namespace: auth-service
+  labels:
+    app.kubernetes.io/part-of: self-healing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: togglemaster-self-healing
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: togglemaster:self-healing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healing
+  namespace: flag-service
+  labels:
+    app.kubernetes.io/part-of: self-healing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: togglemaster-self-healing
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: togglemaster:self-healing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healing
+  namespace: targeting-service
+  labels:
+    app.kubernetes.io/part-of: self-healing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: togglemaster-self-healing
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: togglemaster:self-healing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healing
+  namespace: evaluation-service
+  labels:
+    app.kubernetes.io/part-of: self-healing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: togglemaster-self-healing
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: togglemaster:self-healing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: self-healing
+  namespace: analytics-service
+  labels:
+    app.kubernetes.io/part-of: self-healing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: togglemaster-self-healing
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: togglemaster:self-healing

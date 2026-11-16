@@ -139,6 +139,17 @@ module "k8s_addons" {
   # o for_each do aws_provider_installer no plan.
 }
 
+# Self-Healing (Fase 4): role assumida via OIDC pelo workflow
+# .github/workflows/self-healing.yaml, com acesso mínimo ao cluster.
+module "self_healing" {
+  source = "./modules/self-healing"
+
+  cluster_name                = module.eks.cluster_name
+  github_repository           = var.github_repository
+  create_github_oidc_provider = var.create_github_oidc_provider
+  tags                        = local.tags
+}
+
 # DESLIGADO: os 5 workloads passaram a ser gerenciados pelo ArgoCD (GitOps),
 # em gitops/. Manter este módulo ligado faria o Terraform e o ArgoCD brigarem
 # pela posse dos Deployments (cada apply/sync desfazendo o outro).

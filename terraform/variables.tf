@@ -177,3 +177,19 @@ variable "master_key_length" {
   type        = number
   default     = 48
 }
+
+# ---------------------------------------------------------------------------
+# Self-Healing (GitHub Actions -> EKS via OIDC)
+# ---------------------------------------------------------------------------
+
+variable "github_repository" {
+  description = "Repositório (owner/nome) cujo workflow self-healing pode reiniciar deployments"
+  type        = string
+  default     = "vilsonbuenos/fiap-fase4"
+}
+
+variable "create_github_oidc_provider" {
+  description = "false se a conta AWS já tiver o OIDC provider do GitHub (token.actions.githubusercontent.com)"
+  type        = bool
+  default     = true
+}
