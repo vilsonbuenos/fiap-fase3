@@ -1,0 +1,220 @@
+name: self-healing
+
+# Self-Healing (Runbook Automation) do ToggleMaster.
+#
+#   Datadog Monitor (5xx > 5%) --webhook--> GitHub API repository_dispatch
+#     --> este workflow --OIDC--> IAM role --> EKS --> kubectl rollout restart
+#
+# Disparos:
+#   - repository_dispatch (event_type: self-healing): enviado pelo webhook
+#     "selfheal-github" do Datadog (self-healing/datadog/).
+#   - workflow_dispatch: teste manual pela aba Actions.
+#
+# Sem chaves AWS de longa duração: o job assume a role via OIDC do GitHub. A
+# role só tem eks:DescribeCluster e, dentro do cluster, o grupo RBAC
+# "togglemaster:self-healing" (patch em deployments dos 5 namespaces).
+#
+# Configuração (Settings > Secrets and variables > Actions):
+#   vars.SELF_HEALING_ROLE_ARN   (obrigatório) output self_healing_role_arn do Terraform
+#   vars.AWS_REGION              (opcional, padrão us-east-2)
+#   vars.EKS_CLUSTER_NAME        (opcional, padrão eks-tc3-prod-001)
+#   vars.DD_SITE                 (opcional, padrão datadoghq.com)
+#   secrets.DD_API_KEY           (opcional) registra o resultado como evento no Datadog
+#   secrets.CHATOPS_WEBHOOK_URL  (opcional) avisa o resultado no Slack/Discord/Teams
+run-name: >-
+  Self-healing ${{ github.event.client_payload.service || inputs.service || 'auto' }}
+  (${{ github.event_name == 'repository_dispatch' && format('Datadog: {0}', github.event.client_payload.transition) || 'manual' }})
+
+on:
+  repository_dispatch:
+    types: [self-healing]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Serviço a reiniciar"
+        required: true
+        type: choice
+        default: auth-service
+        options: [auth-service, flag-service, targeting-service, evaluation-service, analytics-service]
+      force:
+        description: "Ignorar o cooldown anti-flapping"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Só diagnosticar (não reinicia)"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write   # OIDC -> AWS
+  contents: read
+
+# Um self-healing por serviço por vez; alertas repetidos entram na fila em vez
+# de disparar restarts em paralelo.
+concurrency:
+  group: self-healing-${{ github.event.client_payload.service || github.event.client_payload.scope || inputs.service }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME || 'eks-tc3-prod-001' }}
+  DD_SITE: ${{ vars.DD_SITE || 'datadoghq.com' }}
+  COOLDOWN_MINUTES: "10"
+  HAS_DD_KEY: ${{ secrets.DD_API_KEY != '' }}
+  HAS_HOOK: ${{ secrets.CHATOPS_WEBHOOK_URL != '' }}
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # O payload do webhook é tratado como dado não confiável: entra só por
+      # variável de ambiente (nunca interpolado no script) e é validado.
+      - name: Interpretar o alerta
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          P_SERVICE: ${{ github.event.client_payload.service }}
+          P_SCOPE: ${{ github.event.client_payload.scope }}
+          P_TRANSITION: ${{ github.event.client_payload.transition }}
+          P_TITLE: ${{ github.event.client_payload.alert_title }}
+          P_LINK: ${{ github.event.client_payload.link }}
+          P_ALERT_ID: ${{ github.event.client_payload.alert_id }}
+          I_SERVICE: ${{ inputs.service }}
+          I_FORCE: ${{ inputs.force }}
+          I_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            service="$I_SERVICE"; transition="Manual"; force="$I_FORCE"; dry_run="$I_DRY_RUN"
+          else
+            # Monitor multi-alert "by {service}": o escopo chega como "service:auth-service,env:prod"
+            service="${P_SERVICE:-$(grep -oE 'service:[a-z0-9-]+' <<<"$P_SCOPE" | head -1 | cut -d: -f2 || true)}"
+            transition="${P_TRANSITION:-Triggered}"; force=false; dry_run=false
+          fi
+
+          # Valores vão para $GITHUB_OUTPUT: nada além de [a-z0-9-] (evita injeção de outputs)
+          [[ "$service" =~ ^[a-z0-9-]*$ ]] || service="invalido"
+          [[ "$transition" =~ ^[A-Za-z-]+$ ]] || transition="Desconhecida"
+
+          # Só age quando o alerta DISPARA; recuperação/aviso só ficam registrados
+          case "$transition" in
+            Triggered|Re-Triggered|Manual) run=true ;;
+            *) run=false ;;
+          esac
+
+          {
+            echo "service=${service}"
+            echo "transition=${transition}"
+            echo "force=${force}"
+            echo "dry_run=${dry_run}"
+            echo "run=${run}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## 🚨 Alerta recebido"
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| Origem | \`${EVENT_NAME}\` |"
+            echo "| Transição | ${transition} |"
+            echo "| Serviço | \`${service:-?}\` |"
+            echo "| Escopo | \`${P_SCOPE:-n/a}\` |"
+            echo "| Monitor | ${P_TITLE:-n/a} (id ${P_ALERT_ID:-n/a}) |"
+            [[ -n "${P_LINK:-}" ]] && echo "| Link | ${P_LINK} |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Serviço=${service} transição=${transition} executar=${run}"
+
+      - name: Autenticar na AWS (OIDC)
+        if: steps.target.outputs.run == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.SELF_HEALING_ROLE_ARN }}
+          role-session-name: self-healing-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar kubeconfig do EKS
+        if: steps.target.outputs.run == 'true'
+        run: |
+          aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+          kubectl version --client=true
+
+      - name: Executar runbook (diagnóstico + rollout restart + verificação)
+        id: heal
+        if: steps.target.outputs.run == 'true'
+        env:
+          SERVICE: ${{ steps.target.outputs.service }}
+          FORCE: ${{ steps.target.outputs.force }}
+          DRY_RUN: ${{ steps.target.outputs.dry_run }}
+        run: |
+          set -o pipefail
+          RESULT_FILE="$GITHUB_OUTPUT" bash self-healing/scripts/selfheal.sh 2>&1 | tee selfheal.log
+
+      - name: Resumo da execução
+        if: always() && steps.target.outputs.run == 'true'
+        env:
+          RESULT: ${{ steps.heal.outputs.result || 'failed' }}
+          DETAIL: ${{ steps.heal.outputs.detail || 'o runbook não chegou ao fim (veja o log)' }}
+        run: |
+          case "$RESULT" in
+            healed)    icon="✅" ;;
+            dry-run)   icon="🔍" ;;
+            escalated) icon="🧑‍🚒" ;;
+            *)         icon="❌" ;;
+          esac
+          {
+            echo "## ${icon} Self-healing: ${RESULT}"
+            echo "${DETAIL}"
+            echo
+            echo "<details><summary>Log do runbook</summary>"
+            echo
+            echo '```'
+            sed -e '/^::/d' selfheal.log 2>/dev/null | tail -n 80 || echo "(sem log)"
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ignorado (não é disparo de alerta)
+        if: steps.target.outputs.run != 'true'
+        env:
+          TRANSITION: ${{ steps.target.outputs.transition }}
+        run: |
+          echo "Transição '${TRANSITION}': nada a fazer (só age em Triggered/Re-Triggered)." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Fecha o ciclo: o resultado aparece na timeline do Datadog (Event
+      # Explorer / overlay nos gráficos) ao lado do alerta que o causou.
+      - name: Registrar evento no Datadog
+        if: always() && steps.target.outputs.run == 'true' && env.HAS_DD_KEY == 'true'
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          SERVICE: ${{ steps.target.outputs.service }}
+          RESULT: ${{ steps.heal.outputs.result || 'failed' }}
+          DETAIL: ${{ steps.heal.outputs.detail || 'o runbook não chegou ao fim' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          alert_type=$([[ "$RESULT" == "healed" ]] && echo success || echo error)
+          body=$(jq -n --arg t "Self-healing ${RESULT}: ${SERVICE}" \
+                       --arg x "${DETAIL}"$'\n'"Execução: ${RUN_URL}" \
+                       --arg s "service:${SERVICE}" --arg a "$alert_type" \
+            '{title:$t, text:$x, alert_type:$a, source_type_name:"github",
+              tags:[$s, "env:prod", "automation:self-healing", "result:\(env.RESULT)"]}')
+          curl -sS -f -X POST "https://api.${DD_SITE}/api/v1/events" \
+            -H "Content-Type: application/json" -H "DD-API-KEY: ${DD_API_KEY}" \
+            -d "$body" -o /dev/null && echo "Evento enviado ao Datadog."
+
+      - name: Notificar ChatOps
+        if: always() && steps.target.outputs.run == 'true' && env.HAS_HOOK == 'true'
+        env:
+          HOOK: ${{ secrets.CHATOPS_WEBHOOK_URL }}
+          SERVICE: ${{ steps.target.outputs.service }}
+          RESULT: ${{ steps.heal.outputs.result || 'failed' }}
+          DETAIL: ${{ steps.heal.outputs.detail || 'o runbook não chegou ao fim' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          msg="🤖 *Self-healing* \`${SERVICE}\`: *${RESULT}*"$'\n'"${DETAIL}"$'\n'"${RUN_URL}"
+          # "text" = Slack/Teams, "content" = Discord
+          jq -n --arg m "$msg" '{text:$m, content:$m}' \
+            | curl -sS -f -X POST "$HOOK" -H "Content-Type: application/json" -d @- -o /dev/null \
+            && echo "Notificação enviada."

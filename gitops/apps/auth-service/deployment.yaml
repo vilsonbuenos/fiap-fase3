@@ -34,6 +34,9 @@ spec:
           value: "http/protobuf"
         - name: PORT
           value: "8001"
+        # Habilita /auth/admin/chaos (protegido pela MASTER_KEY) para a demo do self-healing
+        - name: CHAOS_ENABLED
+          value: "true"
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:

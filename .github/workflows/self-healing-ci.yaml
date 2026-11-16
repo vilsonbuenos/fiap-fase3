@@ -1,0 +1,84 @@
+name: self-healing-ci
+
+# Valida tudo o que compõe o self-healing sem precisar de AWS/Datadog:
+# runbook (testes com kubectl falso + shellcheck), workflows (actionlint),
+# Terraform (fmt/validate das duas stacks), auth-service (build + testes do
+# chaos.go) e manifests GitOps (kustomize).
+on:
+  pull_request:
+    paths:
+      - "self-healing/**"
+      - ".github/workflows/self-healing*.yaml"
+      - "terraform/**"
+      - "gitops/self-healing/**"
+      - "gitops/bootstrap/apps/self-healing.yaml"
+      - "gitops/apps/auth-service/**"
+      - "auth-service/**"
+  push:
+    branches: [feat/self-healing]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runbook:
+    name: Runbook (testes + shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -S warning self-healing/scripts/*.sh self-healing/demo/*.sh self-healing/tests/*.sh
+      - name: Testes do selfheal.sh (kubectl falso)
+        run: bash self-healing/tests/test-selfheal.sh
+
+  workflows:
+    name: Workflows (actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color .github/workflows/self-healing.yaml .github/workflows/self-healing-ci.yaml
+
+  terraform:
+    name: Terraform (fmt + validate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: fmt
+        run: terraform fmt -check -recursive terraform/modules/self-healing self-healing/datadog && terraform fmt -check terraform
+      - name: validate (infra principal)
+        working-directory: terraform
+        run: terraform init -backend=false -input=false && terraform validate
+      - name: validate (Datadog)
+        working-directory: self-healing/datadog
+        run: terraform init -backend=false -input=false && terraform validate
+
+  auth-service:
+    name: auth-service (build + testes)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: auth-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: auth-service/go.mod
+          cache: false
+      # go.sum não é versionado no repo (o Dockerfile também roda o tidy)
+      - run: go mod tidy
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -v -run Chaos ./...
+
+  gitops:
+    name: GitOps (kustomize)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: kubectl kustomize gitops/self-healing
+      - run: kubectl kustomize gitops/apps/auth-service | grep -A1 CHAOS_ENABLED

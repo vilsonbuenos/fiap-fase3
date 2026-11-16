@@ -1,0 +1,11 @@
+# Copie para terraform.tfvars (ignorado pelo Git) e preencha.
+datadog_api_key = "<DD_API_KEY>"
+datadog_app_key = "<DD_APP_KEY>"
+datadog_site    = "datadoghq.com"
+
+# Fine-grained PAT: Repository access = só vilsonbuenos/fiap-fase4,
+# Permissions > Contents = Read and write
+github_token = "<github_pat_...>"
+
+# Integrações do grupo (PagerDuty/OpsGenie + Slack/Discord/Teams), se já existirem no Datadog
+extra_notification_handles = ""

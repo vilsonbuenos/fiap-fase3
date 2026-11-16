@@ -1,0 +1,26 @@
+# RBAC do Self-Healing (permissões do workflow .github/workflows/self-healing.yaml).
+# Os RoleBindings vivem nos namespaces dos 5 serviços: se esta Application
+# sincronizar antes deles existirem, o retry abaixo tenta de novo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: self-healing
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/vilsonbuenos/fiap-fase3.git
+    targetRevision: main
+    path: gitops/self-healing
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m
