@@ -37,6 +37,8 @@ EKS sem intervenção humana, verifica se ele voltou e registra o resultado.
 | [`self-healing/datadog/`](datadog/) | Terraform do monitor 5xx e do webhook para o GitHub |
 | [`auth-service/chaos.go`](../auth-service/chaos.go) | Injeção de falha para a demo (`/auth/admin/chaos`) |
 | [`self-healing/demo/`](demo/) | Scripts do vídeo: injetar falha, acompanhar pods, disparo manual |
+| [`self-healing/tests/test-selfheal.sh`](tests/test-selfheal.sh) | Testes do runbook com `kubectl` falso (sem cluster) |
+| [`.github/workflows/self-healing-ci.yaml`](../.github/workflows/self-healing-ci.yaml) | CI: testes, shellcheck, actionlint, Terraform validate, build/teste Go, kustomize |
 
 ## Decisões de projeto
 
