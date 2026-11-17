@@ -9,7 +9,7 @@ EKS sem intervenção humana, verifica se ele voltou e registra o resultado.
                                                      │  trace.http.server.request.{hits,errors}
                                                      ▼
                                   Monitor "[ToggleMaster] auth-service - 5xx > 5%"
-                                                     │  @webhook-selfheal-github  (+ PagerDuty/Slack do grupo)
+                                                     │  @webhook-selfheal-github  + @pagerduty-togglemaster + @webhook-discord-togglemaster
                                                      ▼
                       POST api.github.com/repos/<repo>/dispatches  {event_type: self-healing}
                                                      │
@@ -36,7 +36,7 @@ EKS sem intervenção humana, verifica se ele voltou e registra o resultado.
 | [`gitops/self-healing/rbac.yaml`](../gitops/self-healing/rbac.yaml) | RBAC mínimo do grupo, aplicado pelo ArgoCD |
 | [`self-healing/datadog/`](datadog/) | Terraform do monitor 5xx e do webhook para o GitHub |
 | [`auth-service/chaos.go`](../auth-service/chaos.go) | Injeção de falha para a demo (`/auth/admin/chaos`) |
-| [`self-healing/demo/`](demo/) | Scripts do vídeo: injetar falha, acompanhar pods, disparo manual |
+| [`self-healing/demo/`](demo/) | Scripts do vídeo: tráfego contínuo, injeção manual da falha, pods ao vivo, disparo manual |
 | [`self-healing/tests/test-selfheal.sh`](tests/test-selfheal.sh) | Testes do runbook com `kubectl` falso (sem cluster) |
 | [`.github/workflows/self-healing-ci.yaml`](../.github/workflows/self-healing-ci.yaml) | CI: testes, shellcheck, actionlint, Terraform validate, build/teste Go, kustomize |
 
@@ -95,7 +95,7 @@ kubectl get rolebinding -A -l app.kubernetes.io/part-of=self-healing
 | Variable | `SELF_HEALING_ROLE_ARN` | output `self_healing_role_arn` |
 | Variable | `DD_SITE` | ex.: `datadoghq.com` (o mesmo do otel-gateway) |
 | Secret (opcional) | `DD_API_KEY` | para registrar o resultado como evento no Datadog |
-| Secret (opcional) | `CHATOPS_WEBHOOK_URL` | incoming webhook do Slack/Discord/Teams |
+| Secret (opcional) | `CHATOPS_WEBHOOK_URL` | URL do webhook do canal do Discord (mensagem com o resultado do restart) |
 
 `AWS_REGION` (`us-east-2`) e `EKS_CLUSTER_NAME` (`eks-tc3-prod-001`) já têm
 padrão no workflow.
@@ -122,6 +122,21 @@ que integrou o PagerDuty), basta colocar `@webhook-selfheal-github` na
 mensagem dele, dentro de `{{#is_alert}}...{{/is_alert}}`, e o monitor tem que
 ser agrupado `by {service}`.
 
+### 4.1 Incidente (PagerDuty) e ChatOps (Discord)
+
+O monitor também abre um incidente e avisa no chat. No recovery, o incidente
+é resolvido sozinho.
+
+| Onde | O quê |
+|---|---|
+| PagerDuty | Serviço `togglemaster` com a integração **Datadog** (gera a *Integration Key*) |
+| Datadog ▸ Integrations ▸ PagerDuty | Conectar a conta e adicionar o serviço `togglemaster` com a key → handle `@pagerduty-togglemaster` |
+| Discord | Canal ▸ Integrações ▸ Webhooks ▸ Novo webhook (copiar a URL) |
+| Datadog ▸ Integrations ▸ Webhooks | `discord-togglemaster`, URL do Discord, payload `{"content": "**$EVENT_TITLE**\nValor: $ALERT_METRIC (transição: $ALERT_TRANSITION)\n$LINK"}` (curto de propósito: com `$TEXT_ONLY_MSG` passa do limite de 2000 caracteres do Discord) → handle `@webhook-discord-togglemaster` |
+| GitHub | `gh secret set CHATOPS_WEBHOOK_URL -R vilsonbuenos/fiap-fase4` (mesma URL; o workflow avisa o resultado do restart) |
+
+Os handles já estão no default de `extra_notification_handles`.
+
 ### 5. Nova imagem do auth-service
 
 `chaos.go` precisa entrar na imagem: rode o pipeline/`scripts/build-push.sh`
@@ -137,30 +152,55 @@ bash self-healing/demo/trigger-manual.sh auth-service Triggered
 
 ## Roteiro da demonstração (vídeo)
 
-Abra três janelas: terminal A, terminal B e o navegador (Datadog + GitHub Actions).
+Pré-requisitos na máquina: Git Bash, `aws login` feito (conta 574644334976)
+e, para o terminal B, o `kubectl`:
 
-1. **Terminal B**: `bash self-healing/demo/watch-pods.sh auth-service`
-   (mostra o nome do pod atual).
-2. **Terminal A**: `bash self-healing/demo/inject-failure.sh 10`
-   - mostra que o `/auth/health` continua `200` (o Kubernetes não percebe a falha);
-   - as rodadas de requisição passam a mostrar `10 x 5xx`.
-3. **Datadog ▸ APM ▸ auth-service**: a taxa de erro sobe; abra um trace com erro
-   (span vermelho, log `CHAOS: falha injetada` correlacionado no Loki).
-4. **Datadog ▸ Monitors**: em 1 a 3 min o monitor vai para **ALERT**
-   (Firing). Mostre o evento de notificação com `@webhook-selfheal-github`
-   (e o incidente no PagerDuty/OpsGenie e a mensagem no Slack, se o grupo
-   tiver ligado).
-5. **GitHub ▸ Actions**: a execução `Self-healing auth-service (Datadog: Triggered)`
-   aparece sozinha. Abra o log: diagnóstico ▸ cooldown ▸ `rollout restart` ▸
-   `successfully rolled out` ▸ health check OK.
-6. **Terminal B**: o pod antigo vai para `Terminating` e um novo fica `Running`.
-7. **Terminal A**: os códigos voltam de `500` para `401` (chave inválida =
-   comportamento normal). A falha sumiu porque o pod novo não tem o estado
-   injetado.
-8. **Datadog**: o monitor volta para **OK** (Recovered) e o evento
-   *Self-healing healed: auth-service* aparece na timeline.
-9. Extra (alert fatigue): injete a falha de novo antes de 10 min. O workflow
-   **não** reinicia e termina como `escalated`, pedindo um humano.
+```bash
+winget install -e --id Kubernetes.kubectl
+aws eks update-kubeconfig --region us-east-2 --name eks-tc3-prod-001
+```
+
+Antes de gravar, confira que o monitor está **OK** e que o último restart
+foi há mais de 10 min (senão o workflow termina como `escalated`).
+
+Deixe abertos três terminais (Git Bash, na raiz do repositório) e o navegador
+com Datadog (Monitors), PagerDuty (Incidents), Discord (canal de alertas) e
+GitHub Actions.
+
+| Terminal | Comando | Papel |
+|---|---|---|
+| A | `bash self-healing/demo/traffic.sh` | Tráfego contínuo até Ctrl+C. Verde = 401 (normal), vermelho = 500 |
+| B | `bash self-healing/demo/watch-pods.sh auth-service` | Pods ao vivo: mostra a troca do pod |
+| C | `bash self-healing/demo/inject-failure.sh` | **Você dispara** a falha na hora certa |
+
+1. **Início:** A e B rodando há alguns segundos, tudo verde (`401`), um pod
+   `Running`. Mostre o monitor em **OK**.
+2. **Terminal C:** `bash self-healing/demo/inject-failure.sh` (100% de 500 por
+   10 min). Ele mostra que o `/auth/health` continua `200`: o Kubernetes não
+   percebe a falha.
+3. **Terminal A:** as linhas ficam vermelhas (`5/5 5xx`) com o aviso
+   `>>> serviço começou a devolver 5xx`.
+4. **Datadog ▸ APM ▸ auth-service:** a taxa de erro sobe; abra um trace com
+   erro (log `CHAOS: falha injetada`).
+5. **Datadog ▸ Monitors** (1 a 3 min): o monitor vai para **ALERT**. Ao mesmo
+   tempo:
+   - **PagerDuty:** o incidente é aberto;
+   - **Discord:** chega a mensagem do alerta;
+   - **GitHub Actions:** a execução `Self-healing auto (Datadog: Triggered)`
+     aparece sozinha.
+6. **GitHub Actions:** abra o log de *Executar runbook*: diagnóstico ▸ cooldown
+   ▸ `rollout restart` ▸ `successfully rolled out` ▸ health check OK ▸
+   `RESULTADO: healed`. O Discord recebe a mensagem do resultado.
+7. **Terminal B:** o pod antigo vai para `Terminating` e o novo fica `Running`.
+8. **Terminal A:** volta a ficar verde (`401`) sozinho, com o aviso
+   `>>> serviço voltou ao normal`. O pod novo nasce sem a falha injetada.
+9. **Uns 5 min depois:** o monitor volta para **OK** (Recovered), o Discord
+   recebe a recuperação e o incidente do PagerDuty é **resolvido sozinho**.
+10. Extra (alert fatigue): injete de novo antes de 10 min. O workflow **não**
+    reinicia e termina como `escalated`, pedindo um humano.
+
+Para desligar a falha manualmente: `bash self-healing/demo/inject-failure.sh off`
+(e `... status` para ver o estado).
 
 ## Evidências para o relatório
 

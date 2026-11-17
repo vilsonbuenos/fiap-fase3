@@ -8,4 +8,4 @@ datadog_site    = "datadoghq.com"
 github_token = "<github_pat_...>"
 
 # Integrações do grupo (PagerDuty/OpsGenie + Slack/Discord/Teams), se já existirem no Datadog
-extra_notification_handles = ""
+extra_notification_handles = "@pagerduty-togglemaster @webhook-discord-togglemaster"
