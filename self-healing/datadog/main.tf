@@ -63,7 +63,10 @@ resource "datadog_webhook" "selfheal_github" {
 }
 
 resource "datadog_monitor" "http_5xx_rate" {
-  name = "[ToggleMaster] {{service.name}} - taxa de erro 5xx acima de ${var.critical_threshold * 100}%"
+  # Nome fixo: variáveis {{...}} só são renderizadas nas notificações, não na
+  # lista de monitores. O serviço aparece no título do alerta ("Triggered on
+  # {service:...}") e na mensagem.
+  name = "[ToggleMaster] Self-healing - taxa de erro 5xx acima de ${var.critical_threshold * 100}%"
   type = "query alert"
 
   # Multi-alert: um grupo por serviço. O escopo do alerta (service:xxx) chega
