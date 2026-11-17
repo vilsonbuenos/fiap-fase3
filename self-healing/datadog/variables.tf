@@ -67,5 +67,5 @@ variable "warning_threshold" {
 variable "extra_notification_handles" {
   description = "Handles extras do Datadog (PagerDuty/OpsGenie/Slack/Teams do grupo), ex.: '@pagerduty-ToggleMaster @slack-alertas'"
   type        = string
-  default     = ""
+  default     = "@pagerduty-togglemaster @webhook-discord-togglemaster"
 }
