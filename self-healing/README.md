@@ -9,7 +9,7 @@ EKS sem intervenção humana, verifica se ele voltou e registra o resultado.
                                                      │  trace.http.server.request.{hits,errors}
                                                      ▼
                                   Monitor "[ToggleMaster] auth-service - 5xx > 5%"
-                                                     │  @webhook-selfheal-github  (+ PagerDuty/Slack do grupo)
+                                                     │  @webhook-selfheal-github  + @pagerduty-togglemaster + @webhook-discord-togglemaster
                                                      ▼
                       POST api.github.com/repos/<repo>/dispatches  {event_type: self-healing}
                                                      │
@@ -95,7 +95,7 @@ kubectl get rolebinding -A -l app.kubernetes.io/part-of=self-healing
 | Variable | `SELF_HEALING_ROLE_ARN` | output `self_healing_role_arn` |
 | Variable | `DD_SITE` | ex.: `datadoghq.com` (o mesmo do otel-gateway) |
 | Secret (opcional) | `DD_API_KEY` | para registrar o resultado como evento no Datadog |
-| Secret (opcional) | `CHATOPS_WEBHOOK_URL` | incoming webhook do Slack/Discord/Teams |
+| Secret (opcional) | `CHATOPS_WEBHOOK_URL` | URL do webhook do canal do Discord (mensagem com o resultado do restart) |
 
 `AWS_REGION` (`us-east-2`) e `EKS_CLUSTER_NAME` (`eks-tc3-prod-001`) já têm
 padrão no workflow.
@@ -121,6 +121,21 @@ Para ligar o self-healing num monitor que já existe (por exemplo, o do colega
 que integrou o PagerDuty), basta colocar `@webhook-selfheal-github` na
 mensagem dele, dentro de `{{#is_alert}}...{{/is_alert}}`, e o monitor tem que
 ser agrupado `by {service}`.
+
+### 4.1 Incidente (PagerDuty) e ChatOps (Discord)
+
+O monitor também abre um incidente e avisa no chat. No recovery, o incidente
+é resolvido sozinho.
+
+| Onde | O quê |
+|---|---|
+| PagerDuty | Serviço `togglemaster` com a integração **Datadog** (gera a *Integration Key*) |
+| Datadog ▸ Integrations ▸ PagerDuty | Conectar a conta e adicionar o serviço `togglemaster` com a key → handle `@pagerduty-togglemaster` |
+| Discord | Canal ▸ Integrações ▸ Webhooks ▸ Novo webhook (copiar a URL) |
+| Datadog ▸ Integrations ▸ Webhooks | `discord-togglemaster`, URL do Discord, payload `{"content": "**$EVENT_TITLE**\n$TEXT_ONLY_MSG\n$LINK"}` → handle `@webhook-discord-togglemaster` |
+| GitHub | `gh secret set CHATOPS_WEBHOOK_URL -R vilsonbuenos/fiap-fase4` (mesma URL; o workflow avisa o resultado do restart) |
+
+Os handles já estão no default de `extra_notification_handles`.
 
 ### 5. Nova imagem do auth-service
 
@@ -148,7 +163,7 @@ Abra três janelas: terminal A, terminal B e o navegador (Datadog + GitHub Actio
    (span vermelho, log `CHAOS: falha injetada` correlacionado no Loki).
 4. **Datadog ▸ Monitors**: em 1 a 3 min o monitor vai para **ALERT**
    (Firing). Mostre o evento de notificação com `@webhook-selfheal-github`
-   (e o incidente no PagerDuty/OpsGenie e a mensagem no Slack, se o grupo
+   (o incidente aberto no PagerDuty e a mensagem do alerta no Discord;
    tiver ligado).
 5. **GitHub ▸ Actions**: a execução `Self-healing auth-service (Datadog: Triggered)`
    aparece sozinha. Abra o log: diagnóstico ▸ cooldown ▸ `rollout restart` ▸
