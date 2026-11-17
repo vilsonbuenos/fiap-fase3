@@ -132,7 +132,7 @@ O monitor também abre um incidente e avisa no chat. No recovery, o incidente
 | PagerDuty | Serviço `togglemaster` com a integração **Datadog** (gera a *Integration Key*) |
 | Datadog ▸ Integrations ▸ PagerDuty | Conectar a conta e adicionar o serviço `togglemaster` com a key → handle `@pagerduty-togglemaster` |
 | Discord | Canal ▸ Integrações ▸ Webhooks ▸ Novo webhook (copiar a URL) |
-| Datadog ▸ Integrations ▸ Webhooks | `discord-togglemaster`, URL do Discord, payload `{"content": "**$EVENT_TITLE**\n$TEXT_ONLY_MSG\n$LINK"}` → handle `@webhook-discord-togglemaster` |
+| Datadog ▸ Integrations ▸ Webhooks | `discord-togglemaster`, URL do Discord, payload `{"content": "**$EVENT_TITLE**\nValor: $ALERT_METRIC (transição: $ALERT_TRANSITION)\n$LINK"}` (curto de propósito: com `$TEXT_ONLY_MSG` passa do limite de 2000 caracteres do Discord) → handle `@webhook-discord-togglemaster` |
 | GitHub | `gh secret set CHATOPS_WEBHOOK_URL -R vilsonbuenos/fiap-fase4` (mesma URL; o workflow avisa o resultado do restart) |
 
 Os handles já estão no default de `extra_notification_handles`.
